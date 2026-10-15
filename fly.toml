@@ -1,0 +1,34 @@
+# Fly.io config. Change `app` to a unique name before the first deploy (or let `fly launch` pick one).
+app = "rebus-board"
+primary_region = "lhr"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  DATA_DIR = "/data"
+
+# SQLite lives on this volume, so accounts, teams and scores survive deploys and restarts.
+[[mounts]]
+  source = "rebus_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

@@ -1,0 +1,20 @@
+{
+  "name": "rebus-board",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Team rebus puzzle game: turn pictures into words with your colleagues.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "make-admin": "node src/make-admin.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

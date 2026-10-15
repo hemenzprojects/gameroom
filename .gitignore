@@ -1,0 +1,7 @@
+node_modules/
+# Live game data: player accounts, password hashes, chat. Never commit.
+data/
+.DS_Store
+.idea/
+# Empty clone of the GitHub repo made before this folder became the repo itself
+gameroom/
