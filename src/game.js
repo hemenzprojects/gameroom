@@ -2,17 +2,21 @@
 // Game rules for every game in the room. A round is plain JSON stored on the team row; every change goes through here.
 //   rebus  type the word or phrase a sticky note hides
 //   bible  pick the right answer for an illustrated Bible scene (four choices)
+//   love   the same picture quiz about love and romance; locked until an admin unlocks it for a team
 const crypto = require('crypto');
 const rebus = require('./puzzles');
 const bible = require('./bible');
+const love = require('./love');
 
 const ROUND = 10;
 const GAMES = {
-  rebus: { id: 'rebus', name: 'Rebus Board', tagline: 'Turn pictures into words', levels: rebus.LEVELS },
-  bible: { id: 'bible', name: 'Bible Quiz', tagline: 'Name the story in the picture', levels: bible.LEVELS },
+  rebus: { id: 'rebus', kind: 'rebus', name: 'Rebus Board', tagline: 'Turn pictures into words', levels: rebus.LEVELS },
+  bible: { id: 'bible', kind: 'quiz', name: 'Bible Quiz', tagline: 'Name the story in the picture', levels: bible.LEVELS },
+  love: { id: 'love', kind: 'quiz', name: 'Love Quiz', tagline: 'Romance, couples and love songs', levels: love.LEVELS, locked: true },
 };
 const typeOf = g => (g && GAMES[g.type] ? g.type : 'rebus'); // rounds saved before Bible Quiz existed are rebus
 const levelOf = g => GAMES[typeOf(g)].levels[g.lv];
+const isQuiz = g => GAMES[typeOf(g)].kind === 'quiz';
 
 function shuffle(a) {
   a = a.slice();
@@ -51,7 +55,7 @@ function make(type, lv, seen = {}) {
   return {
     id: crypto.randomBytes(6).toString('hex'), type, lv, order,
     seeds: order.map(() => crypto.randomInt(1e9)),
-    opts: type === 'bible' ? order.map(() => shuffle([0, 1, 2, 3])) : null,
+    opts: GAMES[type].kind === 'quiz' ? order.map(() => shuffle([0, 1, 2, 3])) : null,
     i: 0, status: 'play', score: 0, streak: 0, hints: 0, wrong: [], removed: [], picked: {},
     results: [], solvedBy: null, lastPts: 0, startedAt: Date.now(),
   };
@@ -68,8 +72,8 @@ const reveal = (g, by) => ({ ...g, status: 'revealed', streak: 0, lastPts: 0, so
 const maxHints = g => levelOf(g).maxHints;
 function hint(g) {
   const h = Math.min(maxHints(g), g.hints + 1);
-  // Bible hint 2 is a 50/50: take away two wrong answers nobody has tried yet.
-  if (typeOf(g) === 'bible' && h === 2) {
+  // Quiz hint 2 is a 50/50: take away two wrong answers nobody has tried yet.
+  if (isQuiz(g) && h === 2) {
     const right = correctPos(g);
     const pool = [0, 1, 2, 3].filter(p => p !== right && !(g.wrong || []).includes(p));
     const already = (g.wrong || []).length;
@@ -80,7 +84,7 @@ function hint(g) {
 const next = g => g.i + 1 >= g.order.length
   ? { ...g, status: 'done' }
   : { ...g, i: g.i + 1, status: 'play', hints: 0, wrong: [], removed: [], picked: {}, solvedBy: null, lastPts: 0 };
-// Bible: each player gets ONE pick per question. A wrong pick is crossed out for the team and that player is
+// Quiz games: each player gets ONE pick per question. A wrong pick is crossed out for the team and that player is
 // locked out. When every online player has picked (or no wrong answers are left) the question ends as missed.
 // Returns { game, ok, missed } — game is null when the pick is not allowed.
 function choose(g, by, pos, onlineIds = []) {
@@ -112,7 +116,7 @@ function view(g, nameOf) {
     answer: p && !playing ? answerOf(p) : null,
     results: g.results.map((r, k) => ({ ok: r.ok, by: r.by ? nameOf(r.by) : null, answer: answerOf(puzzleAt(g, k)), ref: puzzleAt(g, k).ref || null })),
   };
-  if (type === 'rebus') {
+  if (!isQuiz(g)) {
     Object.assign(v, {
       note: p ? { e: p.e, seed: g.seeds[g.i] } : null,
       hint: p && playing && g.hints >= 1 ? p.h : null,
@@ -134,4 +138,4 @@ function view(g, nameOf) {
   return v;
 }
 
-module.exports = { GAMES, keyOf, make, solve, reveal, hint, next, choose, view, puzzleAt, answerOf, optionsAt, maxHints, typeOf, levelOf };
+module.exports = { GAMES, isQuiz, keyOf, make, solve, reveal, hint, next, choose, view, puzzleAt, answerOf, optionsAt, maxHints, typeOf, levelOf };

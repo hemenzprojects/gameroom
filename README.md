@@ -4,6 +4,7 @@ A team game room: colleagues create accounts, form teams with a 5-character invi
 
 - **Rebus Board.** Type the word or phrase a sticky note hides. Levels go from Beginner to Legend.
 - **Bible Quiz.** Each question is an illustrated Bible scene with four answers. Levels go from Seeker to Legend, and the Bible reference is shown after each answer.
+- **Love Quiz** (locked). Famous couples, love songs, romantic films and wedding traditions, in the same picture-quiz format. Levels go from Crush to Legend. A team asks for access and an admin unlocks it.
 
 The first teammate to get each answer scores the points, and finished rounds go on each game's leaderboard.
 
@@ -48,6 +49,7 @@ fly open
 | `src/game.js` | Game rules: rounds, scoring, hints, and what each player is allowed to see |
 | `src/puzzles.js` | Rebus puzzle bank: drawings, answers and hints. Answers stay on the server |
 | `src/bible.js` | Bible Quiz bank: scene recipes, questions, answers, clues and references |
+| `src/love.js` | Love Quiz bank: romantic scenes, questions, answers, clues and "Did you know?" facts |
 | `src/db.js` | SQLite schema |
 | `public/` | The web page and styles. `note.js` draws sticky notes, `scene.js` paints Bible scenes, `chat.js` is the team chat |
 
@@ -93,3 +95,12 @@ fly secrets set ADMIN_NAMES="<account name>" -a rebus-board
 npm run make-admin -- "<account name>"                  # add --remove to take it away
 fly ssh console -a rebus-board -C 'node /app/src/make-admin.js "<account name>"'
 ```
+
+## Locked games
+
+A game marked `locked: true` in `src/game.js` (Love Quiz) shows a padlock in the game picker. Any team member can tap **Request access**. Admins get a live alert and a red count on the **Admin** button, and can then:
+
+- **Unlock** or **Decline** the request under *Access requests* in the dashboard.
+- **Unlock** or **Lock** any team directly from the Love Quiz column in the Teams table. Locking again ends a round in progress.
+
+The server checks access before every round starts, so a locked game can't be played by calling the API directly.

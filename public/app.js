@@ -6,13 +6,21 @@ const $ = id => document.getElementById(id);
 let GAMES = [
   { id: 'rebus', name: 'Rebus Board', tagline: 'Turn pictures into words', levels: [] },
   { id: 'bible', name: 'Bible Quiz', tagline: 'Name the story in the picture', levels: [] },
+  { id: 'love', name: 'Love Quiz', tagline: 'Romance, couples and love songs', levels: [], locked: true },
 ];
 const GAME_INFO = {
   rebus: { icon: '🧩', item: 'note', items: 'notes', blurb: 'Each sticky note hides a word or phrase. Read the picture, say it out loud, type what it means.' },
-  bible: { icon: '📖', item: 'question', items: 'questions', blurb: 'Each card paints a Bible story. Pick the right answer from four, then see where to read it.' },
+  bible: { icon: '📖', item: 'question', items: 'questions', blurb: 'Each card paints a Bible story. Pick the right answer from four, then see where to read it.',
+           factLabel: 'Read it: ', cover: { s: 'heaven', fx: ['light'], e: [{ k: 't', t: '📖', x: 150, y: 120, s: 84 }], seed: 11 },
+           done: n => (n >= 8 ? 'Well done, good and faithful servant' : n >= 5 ? 'Nicely done' : 'Keep reading, keep playing') },
+  love: { icon: '💘', item: 'question', items: 'questions', blurb: 'Famous couples, love songs, romantic films and wedding traditions. Pick the right answer from four.',
+          factLabel: 'Did you know? ', cover: { s: 'rosegarden', fx: ['hearts', 'petals'], e: [{ k: 't', t: '💘', x: 150, y: 130, s: 90 }], seed: 31 },
+          done: n => (n >= 8 ? 'True romantics' : n >= 5 ? 'Sweet work' : 'Love takes practice') },
 };
 let ME = null, TEAM = null, MEMBERS = [], GAME = null, FEED = [];
-let MODE = loadMode();            // hub | rebus | bible | admin
+let MODE = loadMode();            // hub | rebus | bible | love | admin
+let ACCESS = {};                  // locked games for my team: { love: { status: 'locked' | 'pending' | 'approved' | 'declined', requester } }
+let ADMIN_PENDING = 0;            // access requests waiting for an admin
 let LB = { game: 'rebus', lv: 0, rows: [] }, AUTH_MODE = 'login', ERR = '', BUSY = false, CONFIRM = null;
 let MSG = { text: '', type: '' }, LASTKEY = '', socket = null, ONLINE = true;
 
@@ -28,7 +36,7 @@ function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false
 const initial = n => (n || '?').trim().charAt(0).toUpperCase();
 function hue(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
 const avatar = (name, on) => `<span class="av"><span style="display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:hsl(${hue(name)} 55% 45%);color:#fff;font-weight:700;font-size:13px">${esc(initial(name))}</span>${on === undefined ? '' : `<i class="${on ? 'on' : ''}" title="${on ? 'Online' : 'Away'}"></i>`}</span>`;
-function loadMode() { try { const m = localStorage.getItem('rebus-mode'); return ['hub', 'rebus', 'bible', 'admin'].includes(m) ? m : 'hub'; } catch { return 'hub'; } }
+function loadMode() { try { const m = localStorage.getItem('rebus-mode'); return ['hub', 'rebus', 'bible', 'love', 'admin'].includes(m) ? m : 'hub'; } catch { return 'hub'; } }
 function setMode(m) {
   MODE = m; CONFIRM = null;
   try { localStorage.setItem('rebus-mode', m); } catch {}
@@ -38,6 +46,8 @@ function setMode(m) {
 }
 const gameDef = id => GAMES.find(g => g.id === id) || GAMES[0];
 const levelsOf = id => gameDef(id).levels;
+const isQuizType = t => t === 'bible' || t === 'love';
+const unlocked = id => !gameDef(id).locked || (ACCESS[id] && ACCESS[id].status === 'approved');
 const article = w => (/^[AEIOU]/i.test(w) ? 'an' : 'a');
 
 // ---------- data ----------
@@ -47,6 +57,7 @@ async function init() {
   ME = r.user; TEAM = r.team;
   if (ME) connect();
   if (MODE === 'admin') { if (ME && ME.role === 'admin') Admin.start(); else MODE = 'hub'; }
+  if (ME && ME.role === 'admin' && MODE !== 'admin') Admin.peek();
   LB.game = MODE === 'hub' || MODE === 'admin' ? 'rebus' : MODE;
   loadLeaderboard();
   render();
@@ -63,7 +74,9 @@ function connect() {
   socket.on('connect_error', () => { ONLINE = false; render(); });
   socket.on('state', s => {
     const before = GAME && GAME.id;
-    TEAM = s.team; MEMBERS = s.members; GAME = s.game;
+    const wasOpen = MODE !== 'hub' && MODE !== 'admin' && unlocked(MODE);
+    TEAM = s.team; MEMBERS = s.members; GAME = s.game; ACCESS = s.access || {};
+    if (wasOpen && !unlocked(MODE)) { toast(`${gameDef(MODE).name} has been locked for your team.`); MODE = 'hub'; }
     // A teammate started a new round: follow them into that game.
     if (GAME && before && GAME.id !== before && MODE !== 'hub' && MODE !== GAME.type && GAME.status === 'play') { MODE = GAME.type; LB = { game: MODE, lv: 0, rows: [] }; loadLeaderboard(); }
     render();
@@ -78,6 +91,11 @@ function connect() {
     ME = TEAM = GAME = null; MEMBERS = []; MODE = 'hub'; Admin.stop();
     socket.disconnect(); socket = null;
     ERR = 'Your account has been suspended. Talk to your admin to get it restored.'; render();
+  });
+  socket.on('locked', ({ game }) => toast(`${gameDef(game).name} is locked for your team. Ask an admin to unlock it.`));
+  socket.on('admin:request', r => {
+    ADMIN_PENDING++; toast(`🔒 ${r.by} (${r.team}) asked to unlock ${r.game}. Open Admin to approve.`);
+    if (MODE === 'admin') Admin.refresh(); else render();
   });
   socket.on('pick:locked', () => toast('You have already used your pick for this question.'));
   socket.on('moved', refreshMe);
@@ -126,7 +144,7 @@ function stats(g) {
 }
 function statusMsg(g) {
   const who = g.solvedBy === ME.name ? 'You' : g.solvedBy || 'Someone';
-  if (g.status === 'solved') return { text: `${who} ${g.type === 'bible' ? 'got it' : 'solved it'}! +${g.lastPts}${g.streak >= 2 ? ` (streak ×${g.streak})` : ''}`, type: 'ok' };
+  if (g.status === 'solved') return { text: `${who} ${isQuizType(g.type) ? 'got it' : 'solved it'}! +${g.lastPts}${g.streak >= 2 ? ` (streak ×${g.streak})` : ''}`, type: 'ok' };
   if (g.status === 'revealed' && !g.solvedBy) return { text: 'Nobody got this one. The answer is on the card.', type: 'no' };
   if (g.status === 'revealed') return { text: who === 'You' ? `The answer is on the ${GAME_INFO[g.type].item === 'note' ? 'note' : 'card'}.` : `${who} gave up on this one.`, type: 'no' };
   return MSG;
@@ -139,11 +157,11 @@ function feedHTML(g) {
 }
 function hintRow(g) {
   const out = g.hints >= g.maxHints;
-  const label = out ? 'No more hints' : g.hints === 0 ? 'Hint (−30%)' : g.type === 'bible' ? '50/50 (−30%)' : 'Show letters (−30%)';
+  const label = out ? 'No more hints' : g.hints === 0 ? 'Hint (−30%)' : isQuizType(g.type) ? '50/50 (−30%)' : 'Show letters (−30%)';
   return `<div class="row"><button class="btn" id="hint" ${out ? 'disabled' : ''}>${label}</button><button class="btn" id="reveal">Give up</button></div>`;
 }
 function summaryHTML(g) {
-  const n = g.results.filter(r => r.ok).length, L = levelsOf(g.type), bible = g.type === 'bible';
+  const n = g.results.filter(r => r.ok).length, L = levelsOf(g.type), bible = isQuizType(g.type);
   return `<div class="summary"><h2>${esc(L[g.lv].name)} finished with ${g.score} points</h2>
     <p class="muted">${n} of ${g.results.length} ${bible ? 'right' : 'solved'}. This round is on the leaderboard.</p>
     <ol>${g.results.map(r => `<li class="${r.ok ? '' : 'no'}"><span class="ans">${esc(r.answer)}</span>${r.ref ? ` <span class="ref">${esc(r.ref)}</span>` : ''}${r.ok && r.by ? ` <span class="muted">· ${esc(r.by === ME.name ? 'you' : r.by)}</span>` : ''}</li>`).join('')}</ol>
@@ -177,18 +195,19 @@ function rebusPanel(g) {
     ${feedHTML(g)}`;
 }
 
-// ---------- Bible Quiz ----------
-function bigCard(title, sub) {
-  const sc = drawScene({ s: 'heaven', fx: ['light'], e: [{ k: 't', t: '📖', x: 150, y: 120, s: 84 }], seed: 11 });
+// ---------- picture quizzes (Bible Quiz, Love Quiz) ----------
+function bigCard(type, title, sub) {
+  const sc = drawScene(GAME_INFO[type].cover);
   return `<figure class="scroll"><div class="art">${sc}</div><figcaption><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}</figcaption></figure>`;
 }
-function bibleStage(g) {
-  if (!g) return bigCard('Pick a level to start ↗', 'Ten illustrated questions per round');
-  if (g.status === 'done') { const n = g.results.filter(r => r.ok).length; return bigCard(`${n} / ${g.results.length} right`, n >= 8 ? 'Well done, good and faithful servant' : n >= 5 ? 'Nicely done' : 'Keep reading, keep playing'); }
+function quizStage(type, g) {
+  if (!g) return bigCard(type, 'Pick a level to start ↗', 'Ten illustrated questions per round');
+  if (g.status === 'done') { const n = g.results.filter(r => r.ok).length; return bigCard(type, `${n} / ${g.results.length} right`, GAME_INFO[type].done(n)); }
+  const after = g.status !== 'play';
   return `<figure class="scroll"><div class="art">${drawScene(g.scene)}</div>
-    <figcaption>${g.ref ? `<b>${esc(g.answer)}</b><span>Read it: ${esc(g.ref)}</span>` : `<b>${esc(levelsOf('bible')[g.lv].name)} · Question ${g.i + 1}</b><span>Look closely at the picture</span>`}</figcaption></figure>`;
+    <figcaption>${after ? `<b>${esc(g.answer)}</b>${g.ref ? `<span>${esc(GAME_INFO[type].factLabel + g.ref)}</span>` : ''}` : `<b>${esc(levelsOf(type)[g.lv].name)} · Question ${g.i + 1}</b><span>Look closely at the picture</span>`}</figcaption></figure>`;
 }
-function biblePanel(g) {
+function quizPanel(g) {
   if (!g) return `<div class="summary"><h2>Ready when you are</h2><p class="muted">Pick a level above. Everyone on the team sees the same 10 pictures. Each person gets one pick per question. The first right answer wins the points, and a wrong pick is crossed out for the rest of the team.</p></div>`;
   if (g.status === 'done') return summaryHTML(g);
   const done = g.status !== 'play', used = !done && g.picked.includes(ME.id);
@@ -222,13 +241,15 @@ function leaderboardHTML() {
 function previews() {
   const note = drawNote({ e: [{ k: 't', t: 'T', x: 72, y: 150, s: 66 }, { k: 't', t: '+', x: 150, y: 146, s: 44 }, { k: 't', t: '🌧️', x: 228, y: 150, s: 76 }] }, 7);
   const scene = drawScene({ s: 'sea', fx: ['waves', 'clouds', 'sun'], e: [{ k: 't', t: '🐋', x: 165, y: 200, s: 116 }, { k: 't', t: '🧔', x: 78, y: 168, s: 38 }], seed: 23 });
-  return { note: `<div class="note" style="background:${note.bg};transform:rotate(-3deg)">${note.svg}</div>`, scene: `<div class="scroll mini"><div class="art">${scene}</div></div>` };
+  const love = drawScene({ s: 'sunset', fx: ['hearts', 'sparkle'], e: [{ k: 't', t: '👫', x: 150, y: 196, s: 74 }, { k: 't', t: '💘', x: 150, y: 96, s: 54 }], seed: 41 });
+  return { note: `<div class="note" style="background:${note.bg};transform:rotate(-3deg)">${note.svg}</div>`, scene: `<div class="scroll mini"><div class="art">${scene}</div></div>`,
+           love: `<div class="scroll mini"><div class="art">${love}</div></div>` };
 }
 function introHTML() {
   const p = previews();
   return `<section class="intro two"><div class="duo">${p.note}${p.scene}</div>
     <div style="display:grid;gap:10px"><h2>Game night for your team</h2>
-    <p class="muted">Solve picture puzzles and Bible quizzes together. Make a team, share the code, and everyone sees the same picture at the same time. The first person to crack it scores the points.</p></div></section>`;
+    <p class="muted">Solve picture puzzles and quizzes together. Make a team, share the code, and everyone sees the same picture at the same time. The first person to crack it scores the points.</p></div></section>`;
 }
 function renderAuth() {
   const reg = AUTH_MODE === 'register';
@@ -268,6 +289,7 @@ function renderHub() {
   const p = previews();
   const card = (id, art) => {
     const def = gameDef(id), info = GAME_INFO[id], live = GAME && GAME.type === id && GAME.status !== 'done';
+    if (!unlocked(id)) return lockedCard(id, art);
     return `<button class="gamecard ${id}" data-open="${id}">
       <div class="gc-art">${art}</div>
       <div class="gc-body">
@@ -280,17 +302,34 @@ function renderHub() {
   };
   return `<div style="display:grid;gap:20px">${teamCard()}
     <div><h2 style="margin-bottom:4px">Pick a game</h2><p class="muted">Everyone on your team plays the same round. Switch games any time.</p></div>
-    <div class="hub">${card('rebus', p.note)}${card('bible', p.scene)}</div></div>`;
+    <div class="hub">${card('rebus', p.note)}${card('bible', p.scene)}${card('love', p.love)}</div></div>`;
+}
+// A game that needs an admin's OK: shows a padlock and the team's request status.
+function lockedCard(id, art) {
+  const def = gameDef(id), info = GAME_INFO[id], a = ACCESS[id] || { status: 'locked' };
+  const action = a.status === 'pending'
+    ? `<p class="lockstate"><b>Request sent${a.requester ? ` by ${esc(a.requester === ME.name ? 'you' : a.requester)}` : ''}.</b> Waiting for an admin to unlock it.</p>`
+    : `${a.status === 'declined' ? '<p class="lockstate">Your last request was declined. You can ask again.</p>' : ''}
+       <button class="btn primary gc-cta" data-request="${id}">🔑 Request access</button>`;
+  return `<div class="gamecard ${id} locked">
+      <div class="gc-art">${art}<span class="padlock" aria-hidden="true">🔒</span></div>
+      <div class="gc-body">
+        <span class="lockpill">🔒 Locked${a.status === 'pending' ? ' · request pending' : ''}</span>
+        <h2>${info.icon} ${esc(def.name)}</h2>
+        <p class="muted">${esc(info.blurb)} An admin unlocks it for your team.</p>
+        <div class="gc-levels">${def.levels.map((l, i) => `<span class="${i === def.levels.length - 1 ? 'legend' : ''}">${esc(l.name)}</span>`).join('')}</div>
+        ${action}
+      </div></div>`;
 }
 function renderGame() {
   const g = GAME && GAME.type === MODE ? GAME : null;
   const other = GAME && GAME.type !== MODE && GAME.status !== 'done' ? GAME : null;
-  const stage = MODE === 'bible' ? bibleStage(g) : rebusStage(g);
+  const stage = isQuizType(MODE) ? quizStage(MODE, g) : rebusStage(g);
   const panel = other
     ? `<div class="summary"><h2>Your team is in a ${esc(gameDef(other.type).name)} round</h2>
         <p class="muted">${esc(levelsOf(other.type)[other.lv].name)}, ${GAME_INFO[other.type].item} ${other.i + 1} of ${other.total}. Starting a ${esc(gameDef(MODE).name)} round here ends it for everyone.</p>
         <div class="row"><button class="btn primary" data-open="${other.type}">Join that round</button></div></div>`
-    : MODE === 'bible' ? biblePanel(g) : rebusPanel(g);
+    : isQuizType(MODE) ? quizPanel(g) : rebusPanel(g);
   return `<div style="display:grid;gap:20px">${teamCard()}
     ${levelTabs(MODE)}
     <div class="game"><div class="stage">${stage}</div><section class="panel" aria-live="polite">${panel}</section></div>
@@ -298,6 +337,7 @@ function renderGame() {
 }
 const RULES = {
   rebus: 'Scoring: 100 points for a solve, minus 30% for each hint, plus a streak bonus for solving two or more in a row. Harder levels multiply the points, up to ×3 on Legend, where each note allows only one hint.',
+  love: 'One pick per person per question. A wrong pick is crossed out for your team and costs 25%; if everyone online misses, the question is lost. Hints cost 30% and hint 2 is a 50/50. Streaks earn a bonus, and harder levels multiply the points, up to ×3 on Legend.',
   bible: 'One pick per person per question. A wrong pick is crossed out for your team and costs 25%; if everyone online misses, the question is lost. Hints cost 30% and hint 2 is a 50/50. Streaks earn a bonus, and harder levels multiply the points, up to ×3 on Legend.',
   hub: 'Pick a game, pick a level, and play together. Points for each answer go to whoever gets it first, and every finished round goes on that game’s leaderboard.',
 };
@@ -308,12 +348,13 @@ function render() {
   const changed = key !== LASTKEY;
   if (changed) { delete keep.guess; MSG = { text: '', type: '' }; LASTKEY = key; }
   if (MODE === 'admin' && !(ME && ME.role === 'admin')) MODE = 'hub';
+  if (MODE !== 'hub' && MODE !== 'admin' && TEAM && !unlocked(MODE)) MODE = 'hub';
   const isAdminView = ME && MODE === 'admin';
   const inGame = ME && TEAM && MODE !== 'hub' && !isAdminView;
   document.body.dataset.game = inGame ? MODE : 'hub';
-  $('brand').innerHTML = isAdminView ? 'Game <span>Room</span> <small class="adminbadge">Admin</small>' : inGame && MODE === 'bible' ? 'Bible <span>Quiz</span>' : inGame ? 'Rebus <span>Board</span>' : 'Game <span>Room</span>';
+  $('brand').innerHTML = isAdminView ? 'Game <span>Room</span> <small class="adminbadge">Admin</small>' : inGame && MODE === 'bible' ? 'Bible <span>Quiz</span>' : inGame && MODE === 'love' ? 'Love <span>Quiz</span>' : inGame ? 'Rebus <span>Board</span>' : 'Game <span>Room</span>';
   document.title = isAdminView ? 'Admin · Game Room' : inGame ? gameDef(MODE).name : 'Game Room';
-  const adminBtn = ME && ME.role === 'admin' ? (isAdminView ? '<button class="btn small" id="toHub">← Back to games</button>' : '<button class="btn small" id="toAdmin">Admin</button>') : '';
+  const adminBtn = ME && ME.role === 'admin' ? (isAdminView ? '<button class="btn small" id="toHub">← Back to games</button>' : `<button class="btn small" id="toAdmin">Admin${ADMIN_PENDING ? ` <span class="nbadge" title="Access requests waiting">${ADMIN_PENDING}</span>` : ''}</button>`) : '';
   $('hdr').innerHTML = ME ? `${inGame ? '<button class="btn small" id="toHub">← All games</button>' : ''}${adminBtn}<span class="who">${avatar(ME.name)}${esc(ME.name)}</span>${TEAM && !isAdminView ? '<button class="btn small ghost" id="leave">Leave team</button>' : ''}<button class="btn small ghost" id="logout">Log out</button>` : '';
   $('rules').textContent = isAdminView ? 'Suspended people are logged out straight away and cannot log in until an admin restores them. Their scores and chat messages stay.' : RULES[inGame ? MODE : 'hub'];
   $('app').innerHTML = !ME ? renderAuth() : isAdminView ? Admin.html() : !TEAM ? renderLobby() : MODE === 'hub' ? renderHub() : renderGame();
@@ -357,7 +398,14 @@ document.addEventListener('click', async e => {
   const t = e.target.closest('button'); if (!t || t.closest('#chatDock')) return;
   if (t.dataset.adm) { Admin.click(t); return; }
   if (t.dataset.mode) { AUTH_MODE = t.dataset.mode; ERR = ''; render(); return; }
-  if (t.dataset.open) { setMode(t.dataset.open); return; }
+  if (t.dataset.open) { if (unlocked(t.dataset.open)) setMode(t.dataset.open); return; }
+  if (t.dataset.request) {
+    t.disabled = true;
+    api('/api/access/request', { game: t.dataset.request })
+      .then(r => { ACCESS[t.dataset.request] = { status: r.status, requester: ME.name }; toast(r.status === 'approved' ? 'Already unlocked. Have fun!' : 'Request sent. An admin will unlock it for your team.'); render(); })
+      .catch(err => { toast(err.message); t.disabled = false; });
+    return;
+  }
   if (t.dataset.lb != null) { LB.lv = +t.dataset.lb; LB.rows = []; render(); loadLeaderboard(); return; }
   if (t.dataset.lv != null) {
     const lv = +t.dataset.lv;
@@ -386,7 +434,7 @@ document.addEventListener('keydown', e => {
   if (!g || MODE !== g.type || a?.closest?.('#chatDock')) return;
   if (e.key === 'Enter' && (g.status === 'solved' || g.status === 'revealed') && a?.id !== 'next' && a?.tagName !== 'INPUT') { e.preventDefault(); send('next', { i: g.i }); return; }
   // Bible Quiz: press A–D (or 1–4) to answer
-  if (g.type === 'bible' && g.status === 'play' && a?.tagName !== 'INPUT' && !e.metaKey && !e.ctrlKey) {
+  if (isQuizType(g.type) && g.status === 'play' && a?.tagName !== 'INPUT' && !e.metaKey && !e.ctrlKey) {
     const k = 'abcd'.indexOf(e.key.toLowerCase()), n = '1234'.indexOf(e.key), pos = k >= 0 ? k : n;
     if (pos >= 0 && !g.picked.includes(ME.id) && !g.wrong.includes(pos) && !g.removed.includes(pos)) send('choose', { i: g.i, pos });
   }

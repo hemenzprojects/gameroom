@@ -52,6 +52,17 @@ db.exec(`
     at      INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS chat_team ON chat (team_id, id DESC);
+  -- Locked games (e.g. Love Quiz): a team asks, an admin decides.
+  CREATE TABLE IF NOT EXISTS game_access (
+    team_id      INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    game         TEXT NOT NULL,
+    status       TEXT NOT NULL,              -- pending | approved | declined | locked
+    requested_by INTEGER,
+    requested_at INTEGER,
+    decided_by   INTEGER,
+    decided_at   INTEGER,
+    PRIMARY KEY (team_id, game)
+  );
 `);
 
 // Columns added after the first release.

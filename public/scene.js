@@ -15,6 +15,13 @@ const SCENES = {
   palace: { sky: ['#4A2342', '#874A6B'], ground: 'floor', y: 222, g: ['#D3AE57', '#8E6B25'], dark: true },
   feast:  { sky: ['#4E3220', '#86593A'], ground: 'table', y: 204, g: ['#AE7A43', '#6E4522'], dark: true },
   heaven: { sky: ['#FFE9A8', '#FFFDF4'], ground: null, radial: true },
+  // Love Quiz backdrops
+  sunset:     { sky: ['#FF8A80', '#FFD3A5'], ground: 'water', y: 192, g: ['#E0708A', '#6E2C55'] },
+  rosegarden: { sky: ['#FFC9D6', '#FFF1F4'], ground: 'hedge', y: 196, g: ['#6FAE6E', '#3F7F44'] },
+  dinner:     { sky: ['#2E1020', '#6A2840'], ground: 'table', y: 206, g: ['#8E3E58', '#4A1A2C'], dark: true },
+  balcony:    { sky: ['#0E1238', '#3B2D6E'], ground: 'balustrade', y: 214, g: ['#E6DCD2', '#B9A999'], dark: true },
+  wedding:    { sky: ['#FFE3EA', '#FFFFFF'], ground: 'aisle', y: 196, g: ['#F4E7DC', '#E2CDBB'] },
+  city:       { sky: ['#160C2E', '#55306E'], ground: 'skyline', y: 214, g: ['#24163F', '#120A22'], dark: true },
 };
 
 function drawScene(sc) {
@@ -92,6 +99,27 @@ function drawScene(sc) {
       back.push(`<path d="M0 0 H54 Q40 120 62 ${y} H0 Z" fill="#7A1F3D"/><path d="M300 0 H246 Q260 120 238 ${y} H300 Z" fill="#7A1F3D"/>`);
       back.push(`<path d="M0 0 H300 V18 Q150 40 0 18 Z" fill="#8E2A4A"/>`);
       break;
+    case 'hedge':
+      back.push(`<rect y="${y}" width="300" height="${300 - y}" fill="url(#${id}gr)"/>`);
+      for (let x = -10; x < 310; x += 26) back.push(`<circle cx="${x + j(4)}" cy="${y + j(3)}" r="${rr(16, 22)}" fill="${S.g[1]}"/>`);
+      for (let k = 0; k < 16; k++) back.push(`<circle cx="${rr(4, 296)}" cy="${y + rr(-14, 30)}" r="${rr(3, 5)}" fill="${r() < .6 ? '#E2385B' : '#FF8FAB'}"/>`);
+      break;
+    case 'balustrade':
+      back.push(`<rect y="${y}" width="300" height="${300 - y}" fill="${S.g[1]}"/>`);
+      back.push(`<rect y="${y - 8}" width="300" height="12" rx="3" fill="${S.g[0]}"/>`);
+      for (let x = 8; x < 300; x += 24) back.push(`<path d="M${x} ${y + 4} q-7 18 0 36 q7 18 0 36 h12 q-7 -18 0 -36 q7 -18 0 -36 Z" fill="${S.g[0]}" opacity=".95"/>`);
+      break;
+    case 'aisle':
+      back.push(`<rect y="${y}" width="300" height="${300 - y}" fill="url(#${id}gr)"/>`);
+      back.push(`<path d="M126 ${y} L174 ${y} L232 300 L68 300 Z" fill="#C2234B" opacity=".9"/>`);
+      for (let k = 0; k < 4; k++) { const yy = y + 14 + k * 24; back.push(`<rect x="${10 - k * 6}" y="${yy}" width="${70 - k * 8 + k * 6}" height="10" rx="3" fill="#FFFFFF" opacity=".85"/><rect x="${220 + k * 2}" y="${yy}" width="${70 + k * 4}" height="10" rx="3" fill="#FFFFFF" opacity=".85"/>`); }
+      break;
+    case 'skyline':
+      for (let x = -6, k = 0; x < 300; k++) { const w = rr(22, 40), h = rr(40, 110); back.push(`<rect x="${x}" y="${y - h}" width="${w}" height="${h + 300 - y}" fill="${k % 2 ? S.g[0] : S.g[1]}"/>`);
+        for (let wy = y - h + 8; wy < y - 6; wy += 12) for (let wx = x + 5; wx < x + w - 6; wx += 9) if (r() < .45) back.push(`<rect x="${wx}" y="${wy}" width="4" height="5" fill="#FFD27A" opacity=".85"/>`);
+        x += w + 2; }
+      back.push(`<rect y="${y}" width="300" height="${300 - y}" fill="${S.g[1]}"/>`);
+      break;
     case 'table':
       back.push(`<rect y="${y - 6}" width="300" height="${306 - y}" fill="url(#${id}gr)"/>`);
       back.push(`<rect y="${y - 10}" width="300" height="8" fill="#C99A63"/>`);
@@ -112,6 +140,10 @@ function drawScene(sc) {
   // effects in front of the scene
   if (fx.has('rain')) for (let k = 0; k < 60; k++) { const x = rr(-20, 300), yy = rr(-10, 290); front.push(`<line x1="${x}" y1="${yy}" x2="${x - 6}" y2="${yy + 16}" stroke="#D6ECFF" stroke-width="1.6" opacity=".7"/>`); }
   if (fx.has('flakes')) for (let k = 0; k < 44; k++) front.push(`<circle cx="${rr(0, 300)}" cy="${rr(0, y)}" r="${rr(1.5, 3.2)}" fill="#FFFFFF" opacity=".9"/>`);
+  const heart = (x, yy, sz, fill, o) => `<path transform="translate(${x.toFixed(1)} ${yy.toFixed(1)}) scale(${sz.toFixed(2)}) rotate(${j(18).toFixed(0)})" d="M0 -3 C-5 -11 -16 -4 -9 4 L0 12 L9 4 C16 -4 5 -11 0 -3 Z" fill="${fill}" opacity="${o}"/>`;
+  if (fx.has('hearts')) for (let k = 0; k < 10; k++) front.push(heart(rr(10, 290), rr(10, (S.y || 240) - 10), rr(.7, 1.8), ['#FF4D6D', '#FF8FAB', '#E5383B', '#FFB3C6'][k % 4], rr(.55, .9).toFixed(2)));
+  if (fx.has('petals')) for (let k = 0; k < 26; k++) { const cx = rr(0, 300), cy = rr(0, 300); front.push(`<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rr(3, 6).toFixed(1)}" ry="${rr(1.6, 3).toFixed(1)}" transform="rotate(${rr(0, 180).toFixed(0)} ${cx.toFixed(1)} ${cy.toFixed(1)})" fill="${r() < .5 ? '#E2385B' : '#FF7A93'}" opacity="${rr(.6, .95).toFixed(2)}"/>`); }
+  if (fx.has('sparkle')) for (let k = 0; k < 18; k++) { const x = rr(6, 294), yy = rr(6, 200), z = rr(3, 7); front.push(`<path d="M${x} ${yy - z} L${x + z * .3} ${yy - z * .3} L${x + z} ${yy} L${x + z * .3} ${yy + z * .3} L${x} ${yy + z} L${x - z * .3} ${yy + z * .3} L${x - z} ${yy} L${x - z * .3} ${yy - z * .3} Z" fill="#FFF3C4" opacity="${rr(.6, 1).toFixed(2)}"/>`); }
   if (fx.has('wind')) for (let k = 0; k < 4; k++) { const yy = rr(40, 160), x = rr(10, 160); front.push(`<path d="M${x} ${yy} q40 -14 80 0 q20 8 10 18" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round" opacity=".6"/>`); }
 
   // characters and objects

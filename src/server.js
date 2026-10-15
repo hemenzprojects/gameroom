@@ -54,6 +54,20 @@ const q = {
                           FROM teams t ORDER BY t.created_at DESC`),
   roundsByGame: db.prepare('SELECT game, COUNT(*) AS n FROM scores GROUP BY game'),
   chatCount: db.prepare("SELECT COUNT(*) AS n FROM chat WHERE kind = 'msg'"),
+  accessFor: db.prepare(`SELECT a.game, a.status, a.requested_at, u.name AS requester
+                         FROM game_access a LEFT JOIN users u ON u.id = a.requested_by WHERE a.team_id = ?`),
+  accessRequest: db.prepare(`INSERT INTO game_access (team_id, game, status, requested_by, requested_at) VALUES (?, ?, 'pending', ?, ?)
+                             ON CONFLICT (team_id, game) DO UPDATE SET status = 'pending', requested_by = excluded.requested_by,
+                             requested_at = excluded.requested_at, decided_by = NULL, decided_at = NULL`),
+  accessDecide: db.prepare(`INSERT INTO game_access (team_id, game, status, decided_by, decided_at) VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT (team_id, game) DO UPDATE SET status = excluded.status, decided_by = excluded.decided_by,
+                            decided_at = excluded.decided_at`),
+  accessAll: db.prepare(`SELECT a.team_id, a.game, a.status, a.requested_at, a.decided_at, t.name AS team_name,
+                                ru.name AS requester, du.name AS decider
+                         FROM game_access a JOIN teams t ON t.id = a.team_id
+                         LEFT JOIN users ru ON ru.id = a.requested_by LEFT JOIN users du ON du.id = a.decided_by
+                         ORDER BY (a.status = 'pending') DESC, COALESCE(a.requested_at, a.decided_at) DESC`),
+  clearGame: db.prepare('UPDATE teams SET game = NULL WHERE id = ?'),
   adminCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND suspended_at IS NULL"),
   nameById: db.prepare('SELECT name FROM users WHERE id = ?'),
   insertScore: db.prepare(`INSERT INTO scores (team_id, team_name, game, lv, score, correct, total, at)
@@ -183,7 +197,7 @@ app.get('/api/leaderboard', (req, res) => {
 
 app.get('/api/games', (req, res) => {
   res.json(Object.values(G.GAMES).map(g => ({
-    id: g.id, name: g.name, tagline: g.tagline,
+    id: g.id, name: g.name, tagline: g.tagline, locked: !!g.locked,
     levels: g.levels.map(l => ({ name: l.name, blurb: l.blurb, mult: l.mult, maxHints: l.maxHints, notes: Math.min(l.pool.length, 10) })),
   })));
 });
@@ -206,7 +220,13 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       online: users.filter(u => u.team && u.team.id === t.id && u.online).length, playing };
   });
   const rounds = Object.fromEntries(q.roundsByGame.all().map(r => [r.game, r.n]));
+  const access = q.accessAll.all().map(a => ({
+    teamId: a.team_id, team: a.team_name, game: a.game, gameName: (G.GAMES[a.game] || {}).name || a.game,
+    status: a.status, requester: a.requester, requestedAt: a.requested_at, decider: a.decider, decidedAt: a.decided_at,
+  }));
   res.json({
+    access,
+    lockedGames: LOCKED.map(id => ({ id, name: G.GAMES[id].name })),
     stats: {
       people: users.length,
       active: users.filter(u => !u.suspendedAt).length,
@@ -219,6 +239,7 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       rounds: Object.values(rounds).reduce((a, b) => a + b, 0),
       roundsByGame: Object.fromEntries(Object.keys(G.GAMES).map(k => [k, rounds[k] || 0])),
       messages: q.chatCount.get().n,
+      pendingRequests: access.filter(a => a.status === 'pending').length,
     },
     users, teams,
   });
@@ -254,6 +275,44 @@ app.post('/api/admin/users/:id/role', requireAdmin, (req, res) => {
   q.setRole.run(role, t.id);
   console.log(`[admin] ${req.user.name} set ${t.name} to ${role}`);
   res.json({ ok: true });
+});
+
+app.post('/api/access/request', requireUser, (req, res) => {
+  const def = G.GAMES[req.body.game];
+  if (!def || !def.locked) return res.status(400).json({ error: 'That game does not need unlocking.' });
+  if (!req.user.team_id) return res.status(400).json({ error: 'Join a team first, then ask for access.' });
+  const now = accessMap(req.user.team_id)[def.id].status;
+  if (now === 'approved') return res.json({ status: 'approved' });
+  if (now === 'pending') return res.json({ status: 'pending' });
+  q.accessRequest.run(req.user.team_id, def.id, req.user.id, Date.now());
+  const team = q.teamById.get(req.user.team_id);
+  postChat(team.id, null, `🔒 ${req.user.name} asked an admin to unlock ${def.name}`);
+  broadcastTeam(team.id);
+  notifyAdmins('admin:request', { team: team.name, game: def.name, by: req.user.name });
+  console.log(`[access] ${req.user.name} (${team.name}) requested ${def.name}`);
+  res.json({ status: 'pending' });
+});
+
+app.post('/api/admin/access', requireAdmin, (req, res) => {
+  const def = G.GAMES[req.body.game], team = q.teamById.get(Number(req.body.teamId));
+  const action = req.body.action;
+  if (!def || !def.locked) return res.status(400).json({ error: 'That game is not a locked game.' });
+  if (!team) return res.status(404).json({ error: 'That team no longer exists.' });
+  if (!['approve', 'decline', 'lock'].includes(action)) return res.status(400).json({ error: 'Unknown action.' });
+  const status = { approve: 'approved', decline: 'declined', lock: 'locked' }[action];
+  q.accessDecide.run(team.id, def.id, status, req.user.id, Date.now());
+  if (action === 'lock') {
+    const g = team.game ? JSON.parse(team.game) : null;
+    if (g && G.typeOf(g) === def.id && g.status !== 'done') q.clearGame.run(team.id); // end a round in progress
+  }
+  postChat(team.id, null, {
+    approve: `🔓 ${def.name} is unlocked for your team. Have fun! 💘`,
+    decline: `${def.name} stays locked for now. You can ask again later.`,
+    lock: `🔒 ${def.name} has been locked again by an admin.`,
+  }[action]);
+  broadcastTeam(team.id);
+  console.log(`[access] ${req.user.name} ${status} ${def.name} for ${team.name}`);
+  res.json({ ok: true, status });
 });
 
 app.get('/healthz', (req, res) => res.send('ok'));
@@ -299,6 +358,24 @@ function onlineIds(teamId) {
   return [...new Set([...room].map(sid => io.sockets.sockets.get(sid)?.data.userId).filter(Boolean))];
 }
 
+// ---------- locked games ----------
+const LOCKED = Object.values(G.GAMES).filter(g => g.locked).map(g => g.id);
+// { love: { status: 'locked' | 'pending' | 'approved' | 'declined', requester, requestedAt } }
+function accessMap(teamId) {
+  const rows = Object.fromEntries((teamId ? q.accessFor.all(teamId) : []).map(r => [r.game, r]));
+  return Object.fromEntries(LOCKED.map(id => {
+    const r = rows[id];
+    return [id, r ? { status: r.status, requester: r.requester || null, requestedAt: r.requested_at || null } : { status: 'locked' }];
+  }));
+}
+const canPlay = (teamId, type) => !G.GAMES[type].locked || accessMap(teamId)[type].status === 'approved';
+function notifyAdmins(event, data) {
+  for (const s of io.sockets.sockets.values()) {
+    const u = s.data.userId && q.userById.get(s.data.userId);
+    if (u && u.role === 'admin' && !u.suspended_at) s.emit(event, data);
+  }
+}
+
 function broadcastTeam(teamId) {
   const team = q.teamById.get(teamId);
   if (!team) return;
@@ -309,6 +386,7 @@ function broadcastTeam(teamId) {
     team: teamSummary(team),
     members: q.members.all(teamId).map(m => ({ ...m, online: online.has(m.id) })),
     game: G.view(game, nameOf),
+    access: accessMap(teamId),
   });
 }
 
@@ -359,7 +437,8 @@ io.on('connection', socket => {
   socket.on('start', ({ game: type = 'rebus', lv } = {}) => act((g, u, team) => {
     const def = G.GAMES[type], level = def && def.levels[lv];
     if (!level) return null;
-    const icon = type === 'bible' ? '📖' : '🧩';
+    if (!canPlay(teamId, type)) { socket.emit('locked', { game: type }); return null; }
+    const icon = { bible: '📖', love: '💘' }[type] || '🧩';
     // Remember what this team is about to see, so the next rounds bring new questions first.
     const seen = JSON.parse(team.seen || '{}'), bucket = `${type}:${lv}`;
     const round = G.make(type, lv, seen[bucket]);
@@ -389,9 +468,9 @@ io.on('connection', socket => {
     });
   });
 
-  // Bible Quiz: pick one of the four answers.
+  // Quiz games (Bible, Love): pick one of the four answers.
   socket.on('choose', ({ i, pos } = {}) => act((g, u) => {
-    if (!atNote(g, i) || g.status !== 'play' || G.typeOf(g) !== 'bible' || ![0, 1, 2, 3].includes(pos)) return null;
+    if (!atNote(g, i) || g.status !== 'play' || !G.isQuiz(g) || ![0, 1, 2, 3].includes(pos)) return null;
     const label = G.optionsAt(g)[pos];
     const r = G.choose(g, u.id, pos, onlineIds(teamId));
     if (!r.game) { if (r.already) socket.emit('pick:locked'); return null; }

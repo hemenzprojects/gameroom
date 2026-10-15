@@ -17,7 +17,7 @@ const Admin = (() => {
   const day = t => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
 
   async function load() {
-    try { data = await api('/api/admin/overview'); err = ''; }
+    try { data = await api('/api/admin/overview'); err = ''; ADMIN_PENDING = data.stats.pendingRequests; }
     catch (e) { err = e.message; }
     render();
   }
@@ -40,7 +40,7 @@ const Admin = (() => {
       ${tile('Teams', s.teams, `${s.teamsWithPlayers} with players`)}
       ${tile('Online now', s.online, 'Have the game open', s.online ? 'good' : '')}
       ${tile('Active this week', s.activeWeek, 'Seen in the last 7 days')}
-      ${tile('Rounds played', s.rounds, `${s.roundsByGame.rebus || 0} Rebus · ${s.roundsByGame.bible || 0} Bible`)}
+      ${tile('Rounds played', s.rounds, `${s.roundsByGame.rebus || 0} Rebus · ${s.roundsByGame.bible || 0} Bible · ${s.roundsByGame.love || 0} Love`)}
       ${tile('Suspended', s.suspended, s.suspended ? 'Cannot log in' : 'Nobody', s.suspended ? 'bad' : '')}
     </div>`;
   }
@@ -88,26 +88,56 @@ const Admin = (() => {
       <div class="tablewrap"><table><thead><tr><th>Person</th><th>Team</th><th class="n">Points</th><th>Joined</th><th>Last seen</th><th>Status</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="7" class="muted">${q ? `Nobody matches “${esc(q)}”.` : 'Nobody here yet.'}</td></tr>`}</tbody></table></div></section>`;
   }
+  // Requests to unlock a locked game (Love Quiz), newest pending first, then recent decisions.
+  function accessHTML(list) {
+    const pending = list.filter(a => a.status === 'pending');
+    const decided = list.filter(a => a.status !== 'pending').slice(0, 8);
+    const label = { approved: '<span class="pill good">Unlocked</span>', declined: '<span class="pill bad">Declined</span>', locked: '<span class="pill">Locked</span>' };
+    return `<section class="card adm ${pending.length ? 'attention' : ''}"><div class="row" style="justify-content:space-between">
+        <h3>🔒 Access requests ${pending.length ? `<span class="nbadge">${pending.length}</span>` : ''}</h3>
+        <span class="muted" style="font-size:14px">Teams ask to unlock Love Quiz. Unlocking opens it for the whole team.</span></div>
+      ${pending.length ? `<ul class="reqs">${pending.map(a => `<li>
+          <div><b>${esc(a.team)}</b> wants <b>${esc(a.gameName)}</b><small class="muted">Asked by ${esc(a.requester || 'someone')} · ${ago(a.requestedAt)}</small></div>
+          <div class="row"><button class="btn small primary" data-adm="access" data-team="${a.teamId}" data-game="${a.game}" data-action="approve" ${busy ? 'disabled' : ''}>🔓 Unlock</button>
+            <button class="btn small danger-ghost" data-adm="access" data-team="${a.teamId}" data-game="${a.game}" data-action="decline" ${busy ? 'disabled' : ''}>Decline</button></div></li>`).join('')}</ul>`
+        : '<p class="muted">No requests waiting.</p>'}
+      ${decided.length ? `<details><summary class="muted">Recent decisions</summary><ul class="reqs past">${decided.map(a => `<li>
+          <div><b>${esc(a.team)}</b> · ${esc(a.gameName)} ${label[a.status] || ''}<small class="muted">${a.decider ? `by ${esc(a.decider)} · ` : ''}${ago(a.decidedAt)}</small></div>
+          ${a.status === 'approved' ? `<button class="btn small ghost" data-adm="access" data-team="${a.teamId}" data-game="${a.game}" data-action="lock">🔒 Lock again</button>` : ''}</li>`).join('')}</ul></details>` : ''}
+    </section>`;
+  }
   function teamsHTML(teams) {
     const rows = teams.map(t => `<tr>
       <td><b>${esc(t.name)}</b></td><td><code>${esc(t.code)}</code></td>
       <td class="n">${t.members}</td><td class="n">${t.online ? `<span class="pill good">${t.online}</span>` : '0'}</td>
       <td>${t.playing ? `${esc(t.playing.game)} · ${esc(t.playing.level)} <span class="muted">(${t.playing.at}/${t.playing.of})</span>` : '<span class="muted">Not playing</span>'}</td>
-      <td class="n">${t.rounds}</td><td>${day(t.created)}</td></tr>`).join('');
+      <td class="n">${t.rounds}</td>${lockedCols(t)}<td>${day(t.created)}</td></tr>`).join('');
     return `<section class="card adm"><h3>Teams</h3>
-      <div class="tablewrap"><table><thead><tr><th>Team</th><th>Code</th><th class="n">Members</th><th class="n">Online</th><th>Playing now</th><th class="n">Rounds</th><th>Created</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="7" class="muted">No teams yet.</td></tr>'}</tbody></table></div></section>`;
+      <div class="tablewrap"><table><thead><tr><th>Team</th><th>Code</th><th class="n">Members</th><th class="n">Online</th><th>Playing now</th><th class="n">Rounds</th>${(data.lockedGames || []).map(g => `<th>${esc(g.name)}</th>`).join('')}<th>Created</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="${7 + (data.lockedGames || []).length}" class="muted">No teams yet.</td></tr>`}</tbody></table></div></section>`;
+  }
+
+  // One column per locked game: its status for this team and a quick unlock / lock button.
+  function lockedCols(t) {
+    return (data.lockedGames || []).map(g => {
+      const a = data.access.find(x => x.teamId === t.id && x.game === g.id), st = a ? a.status : 'locked';
+      const open = st === 'approved';
+      return `<td><div class="row" style="gap:6px;flex-wrap:nowrap">${open ? '<span class="pill good">Unlocked</span>' : st === 'pending' ? '<span class="pill warn">Requested</span>' : '<span class="pill">Locked</span>'}
+        <button class="btn small ghost" data-adm="access" data-team="${t.id}" data-game="${g.id}" data-action="${open ? 'lock' : 'approve'}" ${busy ? 'disabled' : ''}>${open ? 'Lock' : 'Unlock'}</button></div></td>`;
+    }).join('');
   }
 
   return {
-    start, stop,
+    start, stop, refresh: load,
+    // Just the number of waiting requests, for the badge on the Admin button.
+    async peek() { try { const d = await api('/api/admin/overview'); ADMIN_PENDING = d.stats.pendingRequests; render(); } catch {} },
     html() {
       if (err && !data) return `<section class="card"><h2>Admin</h2><p class="msg no">${esc(err)}</p></section>`;
       if (!data) return '<p class="muted">Loading the dashboard…</p>';
       return `<div style="display:grid;gap:20px">
         <div class="row" style="justify-content:space-between"><div><h2>Admin dashboard</h2><p class="muted">Updates every 20 seconds.</p></div>
           <button class="btn small" data-adm="refresh">Refresh</button></div>
-        ${statsHTML(data.stats)}${peopleHTML(data.users)}${teamsHTML(data.teams)}</div>`;
+        ${statsHTML(data.stats)}${accessHTML(data.access || [])}${peopleHTML(data.users)}${teamsHTML(data.teams)}</div>`;
     },
     click(t) {
       const k = t.dataset.adm, id = Number(t.dataset.id);
@@ -118,6 +148,10 @@ const Admin = (() => {
       else if (k === 'cancel') { pending = null; render(); }
       else if (k === 'do-suspend') act(`/api/admin/users/${id}/suspend`, { reason: document.getElementById('admReason')?.value || '' }, 'Suspended. They have been logged out.');
       else if (k === 'restore') act(`/api/admin/users/${id}/restore`, {}, 'Restored. They can log in again.');
+      else if (k === 'access') {
+        const done = { approve: 'Unlocked for that team. They can play now.', decline: 'Request declined.', lock: 'Locked again for that team.' }[t.dataset.action];
+        act('/api/admin/access', { teamId: Number(t.dataset.team), game: t.dataset.game, action: t.dataset.action }, done);
+      }
       else if (k === 'do-role') act(`/api/admin/users/${id}/role`, { role: t.dataset.role }, t.dataset.role === 'admin' ? 'They are now an admin.' : 'Admin access removed.');
     },
     search() { render(); },

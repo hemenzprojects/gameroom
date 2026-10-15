@@ -378,3 +378,35 @@ body[data-game="bible"] h1 span{font-family:var(--f-serif);font-style:italic;fon
 .confirmrow span{font-size:14px}
 .btn.danger{background:var(--bad);border-color:var(--bad);color:#fff}
 .btn.danger-ghost{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
+
+/* Love Quiz theme: blush paper, deep rose ink */
+body[data-game="love"]{--board:#FCEFF3;--grid:#F6DCE4;--panel:#FFFDFE;--ink:#2B1520;--muted:#77525F;--line:#EED0DA;--accent:#C2185B;--accent-ink:#FFFFFF;--legend:#B8860B;--legend-bg:#FFF4D8;
+  background-image:radial-gradient(var(--grid) 1.2px,transparent 1.4px);background-size:22px 22px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) body[data-game="love"]{--board:#1B1016;--grid:#2A1821;--panel:#25151D;--ink:#F7E6ED;--muted:#C49AAB;--line:#3D2430;--accent:#F48FB1;--accent-ink:#2B0F1A;--legend:#F2C04E;--legend-bg:#2A2414}}
+:root[data-theme="dark"] body[data-game="love"]{--board:#1B1016;--grid:#2A1821;--panel:#25151D;--ink:#F7E6ED;--muted:#C49AAB;--line:#3D2430;--accent:#F48FB1;--accent-ink:#2B0F1A;--legend:#F2C04E;--legend-bg:#2A2414}
+body[data-game="love"] h1 span{font-family:var(--f-serif);font-style:italic;font-weight:700;font-size:1.12em}
+.gamecard.love{--card-accent:#C2185B}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .gamecard.love{--card-accent:#F48FB1}}
+:root[data-theme="dark"] .gamecard.love{--card-accent:#F48FB1}
+.gamecard.love h2{font-family:var(--f-serif);font-size:30px}
+.hub{grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr))}
+
+/* locked game card */
+.gamecard.locked{cursor:default}
+.gamecard.locked:hover{border-color:var(--line);box-shadow:0 1px 1px var(--shadow)}
+.gamecard.locked .gc-art{position:relative}
+.gamecard.locked .gc-art .scroll{filter:saturate(.55) blur(1.5px);opacity:.85}
+.padlock{position:absolute;inset:0;display:grid;place-items:center;font-size:52px;filter:drop-shadow(0 4px 10px rgba(0,0,0,.35))}
+.lockpill{display:inline-flex;gap:6px;align-items:center;font-size:13px;font-weight:700;color:var(--card-accent,var(--accent));border:1px solid currentColor;border-radius:999px;padding:2px 10px}
+.lockstate{font-size:14px;margin:0;color:var(--muted)}
+.lockstate b{color:var(--ink)}
+
+/* admin: requests + badges */
+.nbadge{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--bad);color:#fff;font:700 12px/1 var(--f-body);vertical-align:middle;margin-left:4px}
+.adm.attention{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.reqs{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.reqs li{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--board)}
+.reqs li small{display:block;font-size:12.5px}
+.reqs.past li{background:transparent;padding:8px 12px}
+.adm details summary{cursor:pointer;font-size:14px;margin-top:4px}
+.pill.warn{color:#B26A00;border-color:#B26A00}
