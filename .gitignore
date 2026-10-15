@@ -3,5 +3,3 @@ node_modules/
 data/
 .DS_Store
 .idea/
-# Empty clone of the GitHub repo made before this folder became the repo itself
-gameroom/

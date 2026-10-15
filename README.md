@@ -7,6 +7,9 @@ A team game room: colleagues create accounts, form teams with a 5-character invi
 
 The first teammate to get each answer scores the points, and finished rounds go on each game's leaderboard.
 
+- **Live:** https://rebus-board.fly.dev (the Fly app is called `rebus-board`)
+- **Code:** https://github.com/hemenzprojects/gameroom
+
 - **Server:** Node.js, Express, Socket.IO
 - **Storage:** SQLite (`better-sqlite3`), one file at `$DATA_DIR/rebus.db`
 - **Client:** plain HTML/CSS/JS in `public/` with no build step
@@ -83,10 +86,10 @@ There are two ways to make the first admin:
 
 ```bash
 # 1. Setting, by account name (applied on start-up and when that name signs up)
-ADMIN_NAMES="mike,Ama Mensah" npm start
-fly secrets set ADMIN_NAMES="mike" -a rebus-board
+ADMIN_NAMES="<account name>,<another>" npm start
+fly secrets set ADMIN_NAMES="<account name>" -a rebus-board
 
 # 2. Command, for an account that already exists
-npm run make-admin -- "mike"                  # add --remove to take it away
-fly ssh console -a rebus-board -C 'node /app/src/make-admin.js "mike"'
+npm run make-admin -- "<account name>"                  # add --remove to take it away
+fly ssh console -a rebus-board -C 'node /app/src/make-admin.js "<account name>"'
 ```

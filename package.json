@@ -1,8 +1,8 @@
 {
-  "name": "rebus-board",
+  "name": "gameroom",
   "version": "1.0.0",
   "private": true,
-  "description": "Team rebus puzzle game: turn pictures into words with your colleagues.",
+  "description": "Game Room: team Rebus Board and Bible Quiz with chat and an admin dashboard.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
